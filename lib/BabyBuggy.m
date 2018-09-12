@@ -12,6 +12,17 @@ classdef BabyBuggy < handle
         right_wheel
         imu
         gps
+        
+        d_left
+        d_right
+        
+        vel
+        theta
+        state
+        
+        pos_arr
+        lat_arr
+        gps_arr
     end
 
     properties (Access = public)
@@ -20,16 +31,9 @@ classdef BabyBuggy < handle
 
     methods (Access = public)
         % Class constructor
-        function obj = BabyBuggy(num_particles)
+        function obj = BabyBuggy()
             % Called when a BabyBuggy object is created.
-            client_ip = '192.168.9.120';
-            master_ip = '192.168.9.120';
-            obj.initROS(client_ip, master_ip);
-            
-            % Create particle filter
-            initial_est = zeros(9,1);
-            obj.pf = particleFilter(@babyBuggyStateTransition,@babyBuggyMeasurementLikelihood);
-            initialize(obj.pf, num_particles, initial_est, eye(9));
+            rosinit();
             
             % Initialize timers (wheels, imu)
             obj.pf_timers = {};
@@ -38,11 +42,22 @@ classdef BabyBuggy < handle
                 obj.pf_timers{i} = tic;
                 obj.pf_prev_times{i} = toc(obj.pf_timers{i});
             end
+
+            % Initialize attributes
+            obj.vel = 0;
+            obj.state = [0;0;0];
+            obj.pos_arr = [];
+            obj.lat_arr = [];
+            obj.gps_arr = [];
+            
+            obj.d_left = 0;
+            obj.d_right = 0;
             
             % Initialize sensors
             obj.left_wheel = Encoder(obj, '/encoder1_raw'); 
             obj.right_wheel = Encoder(obj, '/encoder2_raw'); 
             obj.imu = IMU(obj, '/BNO055');
+%             obj.gps = GPS(obj, '/GpsNavSat');
             obj.gps = GPS(obj, '/AdafruitGPS');
             
             % Initialize figure
@@ -57,18 +72,18 @@ classdef BabyBuggy < handle
         end
         
         function updateEncoder(obj)
-            if (obj.left_wheel.updated == 1) && (obj.right_wheel.update == 1)
-                % update particle filter for encoders
+            if (obj.left_wheel.updated == 1) && (obj.right_wheel.updated == 1)
                 cur_time = toc(obj.pf_timers{1});
                 dt = cur_time - obj.pf_prev_times{1};
                 obj.pf_prev_times{1} = cur_time;
 
                 vl = obj.left_wheel.wheel_vel;
                 vr = obj.right_wheel.wheel_vel;
-                v0 = (vl + vr)/2;
+                obj.vel = (vl + vr)/2;
 
-                predict(obj.pf, dt, 'encoder', v0);
-
+                obj.d_left = obj.d_left + obj.left_wheel.d_dist;
+                obj.d_right = obj.d_right + obj.right_wheel.d_dist;
+                
                 % reset updated flags
                 obj.left_wheel.updated = 0;
                 obj.right_wheel.updated = 0;
@@ -76,17 +91,45 @@ classdef BabyBuggy < handle
         end
         
         function updateIMU(obj)
-            ang_vel = obj.imu.ang_vel;
-            predict(obj.pf, dt, 'imu', ang_vel);
-        end
-        
-        function checkGPS(obj)
-            pose = obj.gps.pose;
+            cur_time = toc(obj.pf_timers{2});
+            dt = cur_time - obj.pf_prev_times{2};
+            obj.pf_prev_times{2} = cur_time;
+            
+            x = obj.state(1);
+            y = obj.state(2);
+            th = obj.imu.prev_theta;
+            
+            d_dist = (obj.d_left + obj.d_right)/2;
+            
+            x = x + d_dist * cos(th);
+            y = y + d_dist * sin(th);
+            
+            obj.d_left = 0;
+            obj.d_right = 0;
+            
+            obj.state = [x; y; th];
+            obj.pos_arr = [obj.pos_arr; x y];
             
             figure(obj.fig);
-            hold on;
-            plot(pose(1), pose(2), '.');
-            hold off;
+            subplot(1,2,1);
+            title('Dead Reckoning');
+            
+            plot(obj.pos_arr(:,1), obj.pos_arr(:,2));
+        end
+        
+        function updateGPS(obj)
+            long_lat = obj.gps.cur_gps;
+            gps_pose = obj.gps.pose;
+            
+            obj.lat_arr = [obj.lat_arr; long_lat(1) long_lat(2)];
+            obj.gps_arr = [obj.gps_arr; gps_pose(1) gps_pose(2)];
+            
+            figure(obj.fig);
+            subplot(1,2,2);
+            title('Pure GPS');
+            
+            plot(obj.lat_arr(:,1), obj.lat_arr(:,2));
+%             plot(obj.gps_arr(:,1), obj.gps_arr(:,2));
         end
     end
 end

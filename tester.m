@@ -1,4 +1,5 @@
 rosshutdown
 close all;
 
-rob = BabyBuggy(100);
+rob = BabyBuggy();
+ 

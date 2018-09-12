@@ -14,6 +14,7 @@ classdef GPS < handle
     end
     
     properties (Access = public)
+        cur_gps
         pose
     end
     
@@ -25,7 +26,7 @@ classdef GPS < handle
             obj.rob = rob;
             
             % Initialize ROS subscriber and callback
-            obj.gps_sub = rossubscriber(topic_name, obj.gpsCallback);
+            obj.gps_sub = rossubscriber(topic_name, @gpsCallback);
 %             obj.gps_sub.setOnNewMessageListeners({@obj.gpsCallback}); 
             
             % Initialize attributes            
@@ -33,35 +34,40 @@ classdef GPS < handle
             obj.pose = [0;0;100];
             obj.phi1 = 0;
             obj.meter_per_degree = 40000000 / 360.0;
+            
+            function gpsCallback(~, msg)
+                %METHOD1 Summary of this method goes here
+                %   Detailed explanation goes here
+                if msg.Status.Status ~= 0
+                    return;
+                end
+
+                long = msg.Longitude;
+                lat = msg.Latitude;
+                
+                obj.cur_gps = [long;lat];
+
+                if obj.initial_gps(1) == 0
+                    obj.initial_gps = [long; lat];
+                else
+                    cur_xy = obj.convertGPStoXY([long;lat]);
+                    if obj.pose(3) == 100
+                        obj.pose = [cur_xy; 0];
+                        obj.prev_pose = obj.pose;
+                    else
+                        prev_xy = obj.prev_pose(1:2);
+
+                        theta = atan2(cur_xy(2)-prev_xy(2), cur_xy(1)-prev_xy(1));
+                        obj.pose = [cur_xy; theta];
+                        obj.rob.updateGPS();
+                    end
+                end
+                
+                
+            end
         end
         
-        function gpsCallback(obj, ~, msg)
-            %METHOD1 Summary of this method goes here
-            %   Detailed explanation goes here
-            if msg.Status.Status ~= 0
-                return;
-            end
-            
-            long = msg.Longitude;
-            lat = msg.Latitude;
-
-            if obj.initial_gps(1) == 0
-                obj.initial_gps = [long; lat];
-            else
-                cur_xy = obj.convertGPStoXY([long;lat]);
-                if obj.pose(3) == 100
-                    obj.pose = [cur_xy; 0];
-                    obj.prev_pose = obj.pose;
-                else
-                    prev_xy = obj.prev_pose(1:2);
-                    
-                    theta = atan2(cur_xy(2)-prev_xy(2), cur_xy(1)-prev_xy(1));
-                    obj.pose = [cur_xy; theta];
-                    obj.rob.checkGPS();
-                end
-            end
-            
-        end
+        
         
         function pose = convertGPStoXY(obj, gps_coord)
             long = gps_coord(1);
